@@ -31,7 +31,7 @@ server = do
     conn <- liftIO $ connectPostgreSQL "dbname = putdata"
     r <- liftIO $ quickQuery' conn "SELECT * from strings" []
     liftIO $ disconnect conn
-    return $ map convRow r
+    return $ fmap convRow r
 
 app :: Application
 app = serve userAPI server
