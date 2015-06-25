@@ -51,7 +51,7 @@ server = urls
     where urls :: EitherT ServantErr IO [Url]
           urls = do
               conn <- liftIO $ connectPostgreSQL "dbname = putdata"
-              r <- liftIO $ quickQuery' conn "SELECT * from strings" []
+              r <- liftIO $ quickQuery' conn "SELECT * from strings ORDER BY id DESC" []
               liftIO $ disconnect conn
               return $ fmap convRow r
 
