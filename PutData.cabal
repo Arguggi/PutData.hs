@@ -23,6 +23,7 @@ executable PutData
   build-depends:       base >=4.8 && <4.9,
                        transformers,
                        either,
+                       text,
                        aeson,
                        servant-server,
                        wai,
