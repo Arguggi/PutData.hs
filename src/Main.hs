@@ -49,11 +49,7 @@ server = urls
     :<|> deleteUrl
 
     where urls :: EitherT ServantErr IO [Url]
-          urls = do
-              conn <- liftIO $ connectPostgreSQL "dbname = putdata"
-              r <- liftIO $ quickQuery' conn "SELECT * from strings ORDER BY id DESC" []
-              liftIO $ disconnect conn
-              return $ fmap convRow r
+          urls = liftIO getUrls
 
           newurl :: NewUrl -> EitherT ServantErr IO Status
           newurl insertUrl = do
@@ -76,6 +72,13 @@ server = urls
               case rows of
                   1 -> return Status { code = 0, message = "Url deleted successfully"}
                   _ -> return Status { code = 1, message = "Error while deleting url"}
+
+getUrls :: IO [Url]
+getUrls = do
+    conn <- connectPostgreSQL "dbname = putdata"
+    r <- quickQuery' conn "SELECT * from strings ORDER BY id DESC" []
+    disconnect conn
+    return $ fmap convRow r
 
 app :: Application
 app = serve userAPI server
