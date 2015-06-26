@@ -38,7 +38,7 @@ instance FromJSON NewUrl
 
 type UserAPI = "urls" :> Get '[JSON] [Url]
     :<|> "newurl" :> ReqBody '[JSON] NewUrl :> Post '[JSON] Status
-    :<|> "url" :> Capture "uId" Int :> Delete '[JSON] Status
+    :<|> "url" :> Capture "uId" Integer :> Delete '[JSON] Status
 
 userAPI :: Proxy UserAPI
 userAPI = Proxy
@@ -62,7 +62,7 @@ server = urls
                   1 -> return Status { code = 0, message = "Url added successfully"}
                   _ -> return Status { code = 1, message = "Error while adding url"}
 
-          deleteUrl :: Int -> EitherT ServantErr IO Status
+          deleteUrl :: Integer -> EitherT ServantErr IO Status
           deleteUrl delUrl = do
               conn <- liftIO $ connectPostgreSQL "dbname = putdata"
               stmt <- liftIO $ prepare conn "DELETE FROM strings WHERE id = ?"
