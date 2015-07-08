@@ -42,45 +42,42 @@ type UserAPI = "urls" :> Get '[JSON] [Url]
 userAPI :: Proxy UserAPI
 userAPI = Proxy
 
-server :: Server UserAPI
-server = liftIO getUrls
-    :<|> liftIO . addUrl
-    :<|> liftIO . deleteUrl
+server :: Connection -> Server UserAPI
+server conn = (liftIO $ getUrls conn)
+    :<|> (liftIO . addUrl conn)
+    :<|> (liftIO . deleteUrl conn)
 
-getUrls :: IO [Url]
-getUrls = do
-    conn <- connectPostgreSQL "dbname = putdata"
+getUrls :: Connection -> IO [Url]
+getUrls conn = do
     r <- quickQuery' conn "SELECT * from strings ORDER BY id DESC" []
-    disconnect conn
     return $ fmap convRow r
 
-addUrl :: NewUrl -> IO Status
-addUrl insertUrl = do
-    conn <- connectPostgreSQL "dbname = putdata"
+addUrl :: Connection -> NewUrl -> IO Status
+addUrl conn insertUrl = do
     stmt <- prepare conn "INSERT INTO strings (string) VALUES (?)"
     rows <- execute stmt [toSql $ newUrl insertUrl]
     commit conn
-    disconnect conn
     case rows of
         1 -> return Status { code = 0, message = "Url added successfully"}
         _ -> return Status { code = 1, message = "Error while adding url"}
 
-deleteUrl :: Integer -> IO Status
-deleteUrl delUrl = do
-    conn <- connectPostgreSQL "dbname = putdata"
+deleteUrl :: Connection -> Integer -> IO Status
+deleteUrl conn delUrl = do
     stmt <- prepare conn "DELETE FROM strings WHERE id = ?"
     rows <- execute stmt [toSql delUrl]
     commit conn
-    disconnect conn
     case rows of
         1 -> return Status { code = 0, message = "Url deleted successfully"}
         _ -> return Status { code = 1, message = "Error while deleting url"}
 
-app :: Application
-app = serve userAPI server
+app :: Connection -> Application
+app conn  = serve userAPI $ server conn
 
 main :: IO ()
-main = W.run 8081 app
+main = do
+    conn <- connectPostgreSQL "dbname = putdata"
+    W.run 8081 $ app conn
+    disconnect conn
 
 convRow :: [SqlValue] -> Url
 convRow [sqlId, sqlUrl] = Url { urlId = toUrlId, url = toUrl }
