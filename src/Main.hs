@@ -7,21 +7,20 @@ module Main where
 
 import           Control.Monad.IO.Class
 import           Data.Aeson
-import           Data.Maybe
+import qualified Data.ByteString          as B
 import           Data.Text                as T
-import           Database.HDBC
-import           Database.HDBC.PostgreSQL
+import           Data.Text.Encoding       as TE
+import           Database.Redis           as Redis
 import           GHC.Generics
 import           Network.Wai
 import qualified Network.Wai.Handler.Warp as W
 import           Servant
 
 data Url = Url
-  { urlId :: Integer
-  , url   :: T.Text
+  { url :: T.Text
   } deriving (Eq, Show, Generic)
 
-data Status = Status
+data Stat = Stat
   { code    :: Integer
   , message :: T.Text
   } deriving (Eq, Show, Generic)
@@ -31,56 +30,50 @@ data NewUrl = NewUrl
   } deriving (Eq, Show, Generic)
 
 instance ToJSON Url
-instance ToJSON Status
+instance ToJSON Main.Stat
 instance ToJSON NewUrl
 instance FromJSON NewUrl
 
+listName :: B.ByteString
+listName = "putdata"
+
 type UserAPI = "urls" :> Get '[JSON] [Url]
-    :<|> "newurl" :> ReqBody '[JSON] NewUrl :> Post '[JSON] Status
-    :<|> "url" :> Capture "uId" Integer :> Delete '[JSON] Status
+    :<|> "newurl" :> ReqBody '[JSON] NewUrl :> Post '[JSON] Stat
+    :<|> "url" :> Capture "uString" Text :> Delete '[JSON] Stat
 
 userAPI :: Proxy UserAPI
 userAPI = Proxy
 
 server :: Connection -> Server UserAPI
-server conn = (liftIO $ getUrls conn)
+server conn = liftIO (getUrls conn)
     :<|> (liftIO . addUrl conn)
     :<|> (liftIO . deleteUrl conn)
 
 getUrls :: Connection -> IO [Url]
 getUrls conn = do
-    r <- quickQuery' conn "SELECT * from strings ORDER BY id DESC" []
-    return $ fmap convRow r
+    r <- Redis.runRedis conn (Redis.lrange listName 0 (-1))
+    case r of
+        (Left _) -> return []
+        (Right values) -> return $ (fmap (Url . TE.decodeUtf8) values)
 
-addUrl :: Connection -> NewUrl -> IO Status
+addUrl :: Connection -> NewUrl -> IO Stat
 addUrl conn insertUrl = do
-    stmt <- prepare conn "INSERT INTO strings (string) VALUES (?)"
-    rows <- execute stmt [toSql $ newUrl insertUrl]
-    commit conn
-    case rows of
-        1 -> return Status { code = 0, message = "Url added successfully"}
-        _ -> return Status { code = 1, message = "Error while adding url"}
+    r <- Redis.runRedis conn (Redis.lpush listName [TE.encodeUtf8 . newUrl $ insertUrl])
+    case r of
+        (Left _) -> return Main.Stat { code = 1, message = "Error while adding url"}
+        (Right _) -> return Main.Stat { code = 0, message = "Url added successfully"}
 
-deleteUrl :: Connection -> Integer -> IO Status
+deleteUrl :: Connection -> Text -> IO Stat
 deleteUrl conn delUrl = do
-    stmt <- prepare conn "DELETE FROM strings WHERE id = ?"
-    rows <- execute stmt [toSql delUrl]
-    commit conn
-    case rows of
-        1 -> return Status { code = 0, message = "Url deleted successfully"}
-        _ -> return Status { code = 1, message = "Error while deleting url"}
+    r <- Redis.runRedis conn (Redis.lrem listName 1 (TE.encodeUtf8 delUrl))
+    case r of
+        (Left _) -> return Main.Stat { code = 1, message = "Error while deleting url"}
+        (Right _) -> return Main.Stat { code = 0, message = "Url deleted successfully"}
 
 app :: Connection -> Application
 app conn  = serve userAPI $ server conn
 
 main :: IO ()
 main = do
-    conn <- connectPostgreSQL "dbname = putdata"
+    conn <- Redis.connect Redis.defaultConnectInfo
     W.run 8081 $ app conn
-    disconnect conn
-
-convRow :: [SqlValue] -> Url
-convRow [sqlId, sqlUrl] = Url { urlId = toUrlId, url = toUrl }
-    where toUrlId = fromSql sqlId :: Integer
-          toUrl  = fromMaybe "" (fromSql sqlUrl)
-convRow _ = Url { urlId = 0, url = "" }
