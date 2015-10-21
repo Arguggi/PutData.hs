@@ -33,6 +33,7 @@ executable PutData
                        wai,
                        warp,
                        hedis,
+                       cryptohash,
                        bytestring
   hs-source-dirs:      src
   ghc-options:          -Wall -O2 -with-rtsopts=-N -threaded

@@ -8,6 +8,7 @@ module Main where
 import           Control.Monad.IO.Class
 import           Data.Aeson
 import qualified Data.ByteString          as B
+import qualified Crypto.Hash              as Crypto
 import           Data.Text                as T
 import           Data.Text.Encoding       as TE
 import           Database.Redis           as Redis
@@ -17,7 +18,8 @@ import qualified Network.Wai.Handler.Warp as W
 import           Servant
 
 data Url = Url
-  { url :: T.Text
+  { hash :: T.Text
+  , url :: T.Text
   } deriving (Eq, Show, Generic)
 
 data Stat = Stat
@@ -39,7 +41,7 @@ listName = "putdata"
 
 type UserAPI = "urls" :> Get '[JSON] [Url]
     :<|> "newurl" :> ReqBody '[JSON] NewUrl :> Post '[JSON] Stat
-    :<|> "url" :> Capture "uString" Text :> Delete '[JSON] Stat
+    :<|> "url" :> Capture "uHash" Text :> Delete '[JSON] Stat
 
 userAPI :: Proxy UserAPI
 userAPI = Proxy
@@ -51,23 +53,25 @@ server conn = liftIO (getUrls conn)
 
 getUrls :: Connection -> IO [Url]
 getUrls conn = do
-    r <- Redis.runRedis conn (Redis.lrange listName 0 (-1))
+    r <- Redis.runRedis conn (Redis.hgetall listName)
     case r of
         (Left _) -> return []
-        (Right values) -> return $ (fmap (Url . TE.decodeUtf8) values)
+        (Right values) -> return $ fmap toUrl values
 
 addUrl :: Connection -> NewUrl -> IO Stat
 addUrl conn insertUrl = do
-    r <- Redis.runRedis conn (Redis.lpush listName [TE.encodeUtf8 . newUrl $ insertUrl])
+    let stringHash = hexHash . newUrl $ insertUrl
+    r <- Redis.runRedis conn $ Redis.hset listName stringHash (TE.encodeUtf8 . newUrl $ insertUrl)
     case r of
         (Left _) -> return Main.Stat { code = 1, message = "Error while adding url"}
         (Right _) -> return Main.Stat { code = 0, message = "Url added successfully"}
 
 deleteUrl :: Connection -> Text -> IO Stat
-deleteUrl conn delUrl = do
-    r <- Redis.runRedis conn (Redis.lrem listName 1 (TE.encodeUtf8 delUrl))
+deleteUrl conn delHash = do
+    r <- Redis.runRedis conn (Redis.hdel listName [TE.encodeUtf8 delHash])
     case r of
         (Left _) -> return Main.Stat { code = 1, message = "Error while deleting url"}
+        (Right 0) -> return Main.Stat { code = 1, message = "Error while deleting url"}
         (Right _) -> return Main.Stat { code = 0, message = "Url deleted successfully"}
 
 app :: Connection -> Application
@@ -77,3 +81,12 @@ main :: IO ()
 main = do
     conn <- Redis.connect Redis.defaultConnectInfo
     W.run 8081 $ app conn
+
+hexHash :: Text -> B.ByteString
+hexHash = Crypto.digestToHexByteString . hashDigest . TE.encodeUtf8
+    where
+    hashDigest :: B.ByteString -> Crypto.Digest Crypto.SHA1
+    hashDigest = Crypto.hash
+
+toUrl :: (B.ByteString, B.ByteString) -> Url
+toUrl (hHash, hString) = Url (TE.decodeUtf8 hHash) (TE.decodeUtf8 hString)
