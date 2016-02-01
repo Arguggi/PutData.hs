@@ -6,6 +6,7 @@
 module Main where
 
 import           Control.Monad.IO.Class
+import           Control.Exception        (bracket)
 import           Data.Aeson
 import qualified Data.ByteString          as B
 import qualified Crypto.Hash              as Crypto
@@ -13,7 +14,7 @@ import           Data.Text                as T
 import           Data.Text.Encoding       as TE
 import           Database.Redis           as Redis
 import           GHC.Generics
-import           Network.Wai
+import qualified Network.Wai              as Wai
 import qualified Network.Wai.Handler.Warp as W
 import           Servant
 
@@ -74,13 +75,14 @@ deleteUrl conn delHash = do
         (Right 0) -> return Main.Stat { code = 1, message = "Error while deleting url"}
         (Right _) -> return Main.Stat { code = 0, message = "Url deleted successfully"}
 
-app :: Connection -> Application
+app :: Connection -> Wai.Application
 app conn  = serve userAPI $ server conn
 
 main :: IO ()
-main = do
-    conn <- Redis.connect Redis.defaultConnectInfo
-    W.run 8081 $ app conn
+main = bracket
+         (Redis.connect Redis.defaultConnectInfo)
+         (`Redis.runRedis` Redis.quit)
+         (W.run 8081 . app)
 
 hexHash :: Text -> B.ByteString
 hexHash = Crypto.digestToHexByteString . hashDigest . TE.encodeUtf8
