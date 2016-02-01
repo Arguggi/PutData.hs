@@ -32,15 +32,21 @@ data NewUrl = NewUrl
   { newUrl :: T.Text
   } deriving (Eq, Show, Generic)
 
+data Response = Response
+  { respCode :: Integer
+  , urls :: Maybe [Url]
+  } deriving (Eq, Show, Generic)
+
 instance ToJSON Url
 instance ToJSON Main.Stat
 instance ToJSON NewUrl
+instance ToJSON Response
 instance FromJSON NewUrl
 
 listName :: B.ByteString
 listName = "putdata"
 
-type UserAPI = "urls" :> Get '[JSON] [Url]
+type UserAPI = "urls" :> Get '[JSON] Response
     :<|> "newurl" :> ReqBody '[JSON] NewUrl :> Post '[JSON] Stat
     :<|> "url" :> Capture "uHash" Text :> Delete '[JSON] Stat
 
@@ -52,12 +58,12 @@ server conn = liftIO (getUrls conn)
     :<|> (liftIO . addUrl conn)
     :<|> (liftIO . deleteUrl conn)
 
-getUrls :: Connection -> IO [Url]
+getUrls :: Connection -> IO Response
 getUrls conn = do
     r <- Redis.runRedis conn (Redis.hgetall listName)
     case r of
-        (Left _) -> return []
-        (Right values) -> return $ fmap toUrl values
+        (Left _) -> return Response { respCode = 1, urls = Nothing }
+        (Right values) -> return Response { respCode = 0, urls = Just $ fmap toUrl values }
 
 addUrl :: Connection -> NewUrl -> IO Stat
 addUrl conn insertUrl = do
